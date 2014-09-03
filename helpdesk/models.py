@@ -7,16 +7,19 @@ models.py - Model (and hence database) definitions. This is the core of the
             helpdesk structure.
 """
 
-from datetime import datetime
-
-from django.contrib.auth.models import User
+try:
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+except ImportError:
+    from django.contrib.auth.models import User
 from django.db import models
 from django.conf import settings
 from django.utils.translation import ugettext_lazy as _, ugettext
-from helpdesk.settings import HAS_TAG_SUPPORT
 
-if HAS_TAG_SUPPORT:
-    from tagging.fields import TagField
+try:
+    from django.utils import timezone
+except ImportError:
+    from datetime import datetime as timezone
 
 class Queue(models.Model):
     """
@@ -184,6 +187,8 @@ class Queue(models.Model):
 
     class Meta:
         ordering = ('title',)
+        verbose_name = _('Queue')
+        verbose_name_plural = _('Queues')
 
     def _from_address(self):
         """
@@ -197,7 +202,7 @@ class Queue(models.Model):
             return u'%s <%s>' % (self.title, self.email_address)
     from_address = property(_from_address)
 
-    def save(self, force_insert=False, force_update=False):
+    def save(self, *args, **kwargs):
         if self.email_box_type == 'imap' and not self.email_box_imap_folder:
             self.email_box_imap_folder = 'INBOX'
 
@@ -210,7 +215,7 @@ class Queue(models.Model):
                 self.email_box_port = 995
             elif self.email_box_type == 'pop3' and not self.email_box_ssl:
                 self.email_box_port = 110
-        super(Queue, self).save(force_insert, force_update)
+        super(Queue, self).save(*args, **kwargs)
 
 
 class Ticket(models.Model):
@@ -241,7 +246,7 @@ class Ticket(models.Model):
         (REOPENED_STATUS, _('Reopened')),
         (RESOLVED_STATUS, _('Resolved')),
         (CLOSED_STATUS, _('Closed')),
-        (DUPLICATE_STATUS, _('Duplicate')),        
+        (DUPLICATE_STATUS, _('Duplicate')),
     )
 
     PRIORITY_CHOICES = (
@@ -326,6 +331,12 @@ class Ticket(models.Model):
         help_text=_('1 = Highest Priority, 5 = Low Priority'),
         )
 
+    due_date = models.DateTimeField(
+        _('Due on'),
+        blank=True,
+        null=True,
+        )
+
     last_escalation = models.DateTimeField(
         blank=True,
         null=True,
@@ -379,7 +390,9 @@ class Ticket(models.Model):
         """
         held_msg = ''
         if self.on_hold: held_msg = _(' - On Hold')
-        return u'%s%s' % (self.get_status_display(), held_msg)
+        dep_msg = ''
+        if self.can_be_resolved == False: dep_msg = _(' - Open dependencies')
+        return u'%s%s%s' % (self.get_status_display(), held_msg, dep_msg)
     get_status = property(_get_status)
 
     def _get_ticket_url(self):
@@ -389,7 +402,10 @@ class Ticket(models.Model):
         """
         from django.contrib.sites.models import Site
         from django.core.urlresolvers import reverse
-        site = Site.objects.get_current()
+        try:
+            site = Site.objects.get_current()
+        except:
+            site = Site(domain='configure-django-sites.com')
         return u"http://%s%s?ticket=%s&email=%s" % (
             site.domain,
             reverse('helpdesk_public_view'),
@@ -405,7 +421,10 @@ class Ticket(models.Model):
         """
         from django.contrib.sites.models import Site
         from django.core.urlresolvers import reverse
-        site = Site.objects.get_current()
+        try:
+            site = Site.objects.get_current()
+        except:
+            site = Site(domain='configure-django-sites.com')
         return u"http://%s%s" % (
             site.domain,
             reverse('helpdesk_view',
@@ -413,30 +432,40 @@ class Ticket(models.Model):
             )
     staff_url = property(_get_staff_url)
 
-    if HAS_TAG_SUPPORT:
-        tags = TagField(blank=True)
+    def _can_be_resolved(self):
+        """
+        Returns a boolean.
+        True = any dependencies are resolved
+        False = There are non-resolved dependencies
+        """
+        OPEN_STATUSES = (Ticket.OPEN_STATUS, Ticket.REOPENED_STATUS)
+        return TicketDependency.objects.filter(ticket=self).filter(depends_on__status__in=OPEN_STATUSES).count() == 0
+    can_be_resolved = property(_can_be_resolved)
 
     class Meta:
         get_latest_by = "created"
+        ordering = ('id',)
+        verbose_name = _('Ticket')
+        verbose_name_plural = _('Tickets')
 
     def __unicode__(self):
-        return u'%s' % self.title
+        return u'%s %s' % (self.id, self.title)
 
     def get_absolute_url(self):
         return ('helpdesk_view', (self.id,))
     get_absolute_url = models.permalink(get_absolute_url)
 
-    def save(self, force_insert=False, force_update=False):
+    def save(self, *args, **kwargs):
         if not self.id:
             # This is a new ticket as no ID yet exists.
-            self.created = datetime.now()
+            self.created = timezone.now()
 
         if not self.priority:
             self.priority = 3
 
-        self.modified = datetime.now()
+        self.modified = timezone.now()
 
-        super(Ticket, self).save(force_insert, force_update)
+        super(Ticket, self).save(*args, **kwargs)
 
 
 class FollowUpManager(models.Manager):
@@ -466,8 +495,8 @@ class FollowUp(models.Model):
         )
 
     date = models.DateTimeField(
-        _('Date'), 
-        default = datetime.now()
+        _('Date'),
+        default = timezone.now()
         )
 
     title = models.CharField(
@@ -510,6 +539,8 @@ class FollowUp(models.Model):
 
     class Meta:
         ordering = ['date']
+        verbose_name = _('Follow-up')
+        verbose_name_plural = _('Follow-ups')
 
     def __unicode__(self):
         return u'%s' % self.title
@@ -517,11 +548,11 @@ class FollowUp(models.Model):
     def get_absolute_url(self):
         return u"%s#followup%s" % (self.ticket.get_absolute_url(), self.id)
 
-    def save(self, force_insert=False, force_update=False):
+    def save(self, *args, **kwargs):
         t = self.ticket
-        t.modified = datetime.now()
+        t.modified = timezone.now()
         t.save()
-        super(FollowUp, self).save(force_insert, force_update)
+        super(FollowUp, self).save(*args, **kwargs)
 
 
 class TicketChange(models.Model):
@@ -565,6 +596,10 @@ class TicketChange(models.Model):
                 }
         return str
 
+    class Meta:
+        verbose_name = _('Ticket change')
+        verbose_name_plural = _('Ticket changes')
+
 
 def attachment_path(instance, filename):
     """
@@ -576,8 +611,9 @@ def attachment_path(instance, filename):
     os.umask(0)
     path = 'helpdesk/attachments/%s/%s' % (instance.followup.ticket.ticket_for_url, instance.followup.id )
     att_path = os.path.join(settings.MEDIA_ROOT, path)
-    if not os.path.exists(att_path):
-        os.makedirs(att_path, 0777)
+    if settings.DEFAULT_FILE_STORAGE == "django.core.files.storage.FileSystemStorage":
+        if not os.path.exists(att_path):
+            os.makedirs(att_path, 0777)
     return os.path.join(path, filename)
 
 
@@ -595,16 +631,17 @@ class Attachment(models.Model):
     file = models.FileField(
         _('File'),
         upload_to=attachment_path,
+        max_length=1000,
         )
 
     filename = models.CharField(
         _('Filename'),
-        max_length=100,
+        max_length=1000,
         )
 
     mime_type = models.CharField(
         _('MIME Type'),
-        max_length=30,
+        max_length=255,
         )
 
     size = models.IntegerField(
@@ -626,6 +663,8 @@ class Attachment(models.Model):
 
     class Meta:
         ordering = ['filename',]
+        verbose_name = _('Attachment')
+        verbose_name_plural = _('Attachments')
 
 
 class PreSetReply(models.Model):
@@ -664,6 +703,8 @@ class PreSetReply(models.Model):
 
     class Meta:
         ordering = ['name',]
+        verbose_name = _('Pre-set reply')
+        verbose_name_plural = _('Pre-set replies')
 
     def __unicode__(self):
         return u'%s' % self.name
@@ -701,6 +742,10 @@ class EscalationExclusion(models.Model):
 
     def __unicode__(self):
         return u'%s' % self.name
+
+    class Meta:
+        verbose_name = _('Escalation exclusion')
+        verbose_name_plural = _('Escalation exclusions')
 
 
 class EmailTemplate(models.Model):
@@ -745,7 +790,7 @@ class EmailTemplate(models.Model):
         help_text=_('The same context is available here as in plain_text, '
             'above.'),
         )
-    
+
     locale = models.CharField(
         _('Locale'),
         max_length=10,
@@ -759,6 +804,8 @@ class EmailTemplate(models.Model):
 
     class Meta:
         ordering = ['template_name', 'locale']
+        verbose_name = _('e-mail template')
+        verbose_name_plural = _('e-mail templates')
 
 
 class KBCategory(models.Model):
@@ -785,6 +832,8 @@ class KBCategory(models.Model):
 
     class Meta:
         ordering = ['title',]
+        verbose_name = _('Knowledge base category')
+        verbose_name_plural = _('Knowledge base categories')
 
     def get_absolute_url(self):
         return ('helpdesk_kb_category', (), {'slug': self.slug})
@@ -833,10 +882,10 @@ class KBItem(models.Model):
         blank=True,
         )
 
-    def save(self, force_insert=False, force_update=False):
+    def save(self, *args, **kwargs):
         if not self.last_updated:
-            self.last_updated = datetime.now()
-        return super(KBItem, self).save(force_insert, force_update)
+            self.last_updated = timezone.now()
+        return super(KBItem, self).save(*args, **kwargs)
 
     def _score(self):
         if self.votes > 0:
@@ -850,6 +899,8 @@ class KBItem(models.Model):
 
     class Meta:
         ordering = ['title',]
+        verbose_name = _('Knowledge base item')
+        verbose_name_plural = _('Knowledge base items')
 
     def get_absolute_url(self):
         return ('helpdesk_kb_item', (self.id,))
@@ -859,7 +910,7 @@ class KBItem(models.Model):
 class SavedSearch(models.Model):
     """
     Allow a user to save a ticket search, eg their filtering and sorting
-    options, and optionally share it with other users. This lets people 
+    options, and optionally share it with other users. This lets people
     easily create a set of commonly-used filters, such as:
         * My tickets waiting on me
         * My tickets waiting on submitter
@@ -896,10 +947,15 @@ class SavedSearch(models.Model):
         else:
             return u'%s' % self.title
 
+    class Meta:
+        verbose_name = _('Saved search')
+        verbose_name_plural = _('Saved searches')
+
+
 class UserSettings(models.Model):
     """
     A bunch of user-specific settings that we want to be able to define, such
-    as notification preferences and other things that should probably be 
+    as notification preferences and other things that should probably be
     configurable.
 
     We should always refer to user.usersettings.settings['setting_name'].
@@ -935,13 +991,13 @@ class UserSettings(models.Model):
         return u'Preferences for %s' % self.user
 
     class Meta:
-        verbose_name = 'User Settings'
-        verbose_name_plural = 'User Settings'
+        verbose_name = _('User Setting')
+        verbose_name_plural = _('User Settings')
 
 
 def create_usersettings(sender, created_models=[], instance=None, created=False, **kwargs):
     """
-    Helper function to create UserSettings instances as 
+    Helper function to create UserSettings instances as
     required, eg when we first create the UserSettings database
     table via 'syncdb' or when we save a new user.
 
@@ -956,7 +1012,7 @@ def create_usersettings(sender, created_models=[], instance=None, created=False,
     elif UserSettings in created_models:
         # We just created the UserSettings model, lets create a UserSettings
         # entry for each existing user. This will only happen once (at install
-        # time, or at upgrade) when the UserSettings model doesn't already 
+        # time, or at upgrade) when the UserSettings model doesn't already
         # exist.
         for u in User.objects.all():
             try:
@@ -970,8 +1026,8 @@ models.signals.post_save.connect(create_usersettings, sender=User)
 
 class IgnoreEmail(models.Model):
     """
-    This model lets us easily ignore e-mails from certain senders when 
-    processing IMAP and POP3 mailboxes, eg mails from postmaster or from 
+    This model lets us easily ignore e-mails from certain senders when
+    processing IMAP and POP3 mailboxes, eg mails from postmaster or from
     known trouble-makers.
     """
     queues = models.ManyToManyField(
@@ -1014,10 +1070,10 @@ class IgnoreEmail(models.Model):
     def __unicode__(self):
         return u'%s' % self.name
 
-    def save(self):
+    def save(self, *args, **kwargs):
         if not self.date:
-            self.date = datetime.now()
-        return super(IgnoreEmail, self).save()
+            self.date = timezone.now()
+        return super(IgnoreEmail, self).save(*args, **kwargs)
 
     def test(self, email):
         """
@@ -1042,13 +1098,18 @@ class IgnoreEmail(models.Model):
         else:
             return False
 
+    class Meta:
+        verbose_name = _('Ignored e-mail address')
+        verbose_name_plural = _('Ignored e-mail addresses')
+
+
 class TicketCC(models.Model):
     """
-    Often, there are people who wish to follow a ticket who aren't the 
+    Often, there are people who wish to follow a ticket who aren't the
     person who originally submitted it. This model provides a way for those
     people to follow a ticket.
 
-    In this circumstance, a 'person' could be either an e-mail address or 
+    In this circumstance, a 'person' could be either an e-mail address or
     an existing system user.
     """
 
@@ -1100,6 +1161,10 @@ class TicketCC(models.Model):
 
     def __unicode__(self):
         return u'%s for %s' % (self.display, self.ticket.title)
+
+class CustomFieldManager(models.Manager):
+    def get_query_set(self):
+        return super(CustomFieldManager, self).get_query_set().order_by('ordering')
 
 
 class CustomField(models.Model):
@@ -1162,12 +1227,33 @@ class CustomField(models.Model):
         null=True,
         )
 
+    empty_selection_list = models.BooleanField(
+        _('Add empty first choice to List?'),
+        default=False,
+        help_text=_('Only for List: adds an empty first entry to the choices list, which enforces that the user makes an active choice.'),
+        )
+
     list_values = models.TextField(
         _('List Values'),
         help_text=_('For list fields only. Enter one option per line.'),
         blank=True,
         null=True,
         )
+
+    ordering = models.IntegerField(
+        _('Ordering'),
+        help_text=_('Lower numbers are displayed first; higher numbers are listed later'),
+        blank=True,
+        null=True,
+        )
+
+    def _choices_as_array(self):
+        from StringIO import StringIO
+        valuebuffer = StringIO(self.list_values)
+        choices = [[item.strip(), item.strip()] for item in valuebuffer.readlines()]
+        valuebuffer.close()
+        return choices
+    choices_as_array = property(_choices_as_array)
 
     required = models.BooleanField(
         _('Required?'),
@@ -1179,8 +1265,14 @@ class CustomField(models.Model):
         help_text=_('If this is ticked, then the public submission form will NOT show this field'),
         )
 
+    objects = CustomFieldManager()
+
     def __unicode__(self):
         return '%s' % (self.name)
+
+    class Meta:
+        verbose_name = _('Custom field')
+        verbose_name_plural = _('Custom fields')
 
 
 class TicketCustomFieldValue(models.Model):
@@ -1201,3 +1293,34 @@ class TicketCustomFieldValue(models.Model):
 
     class Meta:
         unique_together = ('ticket', 'field'),
+
+    class Meta:
+        verbose_name = _('Ticket custom field value')
+        verbose_name_plural = _('Ticket custom field values')
+
+
+class TicketDependency(models.Model):
+    """
+    The ticket identified by `ticket` cannot be resolved until the ticket in `depends_on` has been resolved.
+    To help enforce this, a helper function `can_be_resolved` on each Ticket instance checks that
+    these have all been resolved.
+    """
+    ticket = models.ForeignKey(
+        Ticket,
+        verbose_name=_('Ticket'),
+        related_name='ticketdependency',
+        )
+
+    depends_on = models.ForeignKey(
+        Ticket,
+        verbose_name=_('Depends On Ticket'),
+        related_name='depends_on',
+        )
+
+    def __unicode__(self):
+        return '%s / %s' % (self.ticket, self.depends_on)
+
+    class Meta:
+        unique_together = ('ticket', 'depends_on')
+        verbose_name = _('Ticket dependency')
+        verbose_name_plural = _('Ticket dependencies')

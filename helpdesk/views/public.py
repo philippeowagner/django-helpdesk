@@ -7,21 +7,23 @@ views/public.py - All public facing views, eg non-staff (no authentication
                   required) views.
 """
 
-from datetime import datetime
-
 from django.core.urlresolvers import reverse
 from django.http import HttpResponseRedirect, Http404, HttpResponse
 from django.shortcuts import render_to_response, get_object_or_404
 from django.template import loader, Context, RequestContext
 from django.utils.translation import ugettext as _
 
+from helpdesk import settings as helpdesk_settings
 from helpdesk.forms import PublicTicketForm
 from helpdesk.lib import send_templated_mail, text_is_spam
-from helpdesk.models import Ticket, Queue, UserSettings
+from helpdesk.models import Ticket, Queue, UserSettings, KBCategory
 
 
 def homepage(request):
-    if request.user.is_staff:
+    if not request.user.is_authenticated() and helpdesk_settings.HELPDESK_REDIRECT_TO_LOGIN_BY_DEFAULT:
+        return HttpResponseRedirect(reverse('login'))
+
+    if (request.user.is_staff or (request.user.is_authenticated() and helpdesk_settings.HELPDESK_ALLOW_NON_STAFF_TICKET_UPDATE)):
         try:
             if getattr(request.user.usersettings.settings, 'login_view_ticketlist', False):
                 return HttpResponseRedirect(reverse('helpdesk_list'))
@@ -59,9 +61,13 @@ def homepage(request):
         form = PublicTicketForm(initial=initial_data)
         form.fields['queue'].choices = [('', '--------')] + [[q.id, q.title] for q in Queue.objects.filter(allow_public_submission=True)]
 
+    knowledgebase_categories = KBCategory.objects.all()
+
     return render_to_response('helpdesk/public_homepage.html',
         RequestContext(request, {
             'form': form,
+            'helpdesk_settings': helpdesk_settings,
+            'kb_categories': knowledgebase_categories
         }))
 
 
@@ -83,7 +89,13 @@ def view_ticket(request):
             error_message = _('Invalid ticket ID or e-mail address. Please try again.')
 
         if ticket:
-            
+
+            if request.user.is_staff:
+                redirect_url = reverse('helpdesk_view', args=[ticket_id])
+                if request.GET.has_key('close'):
+                    redirect_url += '?close'
+                return HttpResponseRedirect(redirect_url)
+
             if request.GET.has_key('close') and ticket.status == Ticket.RESOLVED_STATUS:
                 from helpdesk.views.staff import update_ticket
                 # Trick the update_ticket() view into thinking it's being called with
@@ -91,17 +103,25 @@ def view_ticket(request):
                 request.POST = {
                     'new_status': Ticket.CLOSED_STATUS,
                     'public': 1,
-                    'owner': ticket.assigned_to.id,
                     'title': ticket.title,
                     'comment': _('Submitter accepted resolution and closed ticket'),
                     }
+                if ticket.assigned_to:
+                    request.POST['owner'] = ticket.assigned_to.id
                 request.GET = {}
 
                 return update_ticket(request, ticket_id, public=True)
-            
+
+            # redirect user back to this ticket if possible.
+            redirect_url = ''
+            if helpdesk_settings.HELPDESK_NAVIGATION_ENABLED:
+                redirect_url = reverse('helpdesk_view', args=[ticket_id])
+
             return render_to_response('helpdesk/public_view_ticket.html',
                 RequestContext(request, {
                     'ticket': ticket,
+                    'helpdesk_settings': helpdesk_settings,
+                    'next': redirect_url,
                 }))
 
     return render_to_response('helpdesk/public_view_form.html',
@@ -109,5 +129,13 @@ def view_ticket(request):
             'ticket': ticket,
             'email': email,
             'error_message': error_message,
+            'helpdesk_settings': helpdesk_settings,
         }))
 
+def change_language(request):
+    return_to = ''
+    if request.GET.has_key('return_to'):
+        return_to = request.GET['return_to']
+
+    return render_to_response('helpdesk/public_change_language.html',
+        RequestContext(request, {'next': return_to}))

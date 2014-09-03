@@ -1,4 +1,4 @@
-{% extends "helpdesk/base.html" %}{% load i18n %}
+{% extends "helpdesk/base.html" %}{% load i18n %}{% load url from future %}
 
 {% block helpdesk_title %}{% trans "Ticket CC Settings" %}{% endblock %}
 
@@ -9,10 +9,10 @@
 
 <p>You can <a href='add/'>add a new e-mail address to the list</a> or delete any of the items below as required.</p>{% endblocktrans %}
 
-<table width='100%'>
+<table class="table table-hover table-bordered">
+<caption>{% trans "Ticket CC List" %}</caption>
 <thead>
-<tr class='row_tablehead'><td colspan='4'>{% trans "Ticket CC List" %}</td></tr>
-<tr class='row_columnheads'><th>{% trans "E-Mail Address" %}</th><th>{% trans "View?" %}</th><th>{% trans "Update?" %}</th><th>{% trans "Delete" %}</th></tr>
+<tr><th>{% trans "E-Mail Address" %}</th><th>{% trans "View?" %}</th><th>{% trans "Update?" %}</th><th>{% trans "Delete" %}</th></tr>
 </thead>
 <tbody>
 {% for person in copies_to %}
@@ -20,12 +20,12 @@
     <td>{{ person.display }}</td>
     <td>{{ person.can_view }}</td>
     <td>{{ person.can_update }}</td>
-    <td><a href='{% url helpdesk_ticket_cc_del ticket.id person.id %}'>{% trans "Delete" %}</a></td>
+    <td><a href='{% url 'helpdesk_ticket_cc_del' ticket.id person.id %}'>{% trans "Delete" %}</a></td>
 </tr>
 {% endfor %}
 </tbody>
 </table>
 
-<p><a href='{% url helpdesk_view ticket.id %}'>{% blocktrans with ticket.title as ticket_title %}Return to <em>{{ ticket_title }}</em>{% endblocktrans %}</a></p>
+<p><a href='{% url 'helpdesk_view' ticket.id %}'>{% blocktrans with ticket.title as ticket_title %}Return to <em>{{ ticket_title }}</em>{% endblocktrans %}</a></p>
 
 {% endblock %}

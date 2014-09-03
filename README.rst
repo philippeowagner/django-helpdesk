@@ -1,6 +1,9 @@
 django-helpdesk - A Django powered ticket tracker for small enterprise.
 =======================================================================
 
+.. image:: https://travis-ci.org/rossp/django-helpdesk.png?branch=master
+
+
 Copyright 2009-11 Jutda and Ross Poulton. All Rights Reserved. See LICENSE for details.
 
 django-helpdesk was formerly known as Jutda Helpdesk, named after the 
@@ -10,22 +13,26 @@ contributors reaching far beyond Jutda.
 
 Complete documentation is available in the docs/ directory, or online at http://django-helpdesk.readthedocs.org/.
 
-You can see a demo installation at http://demo.jutdahelpdesk.com
+You can see a demo installation at http://django-helpdesk-demo.herokuapp.com/
 
 Licensing
-=========
+---------
 
 See the file 'LICENSE' for licensing terms. Note that django-helpdesk is 
 distributed with 3rd party products which have their own licenses. See 
 LICENSE.3RDPARTY for license terms for included packages.
 
 Dependencies (pre-flight checklist)
-===================================
+-----------------------------------
 
-1. Python 2.4+ 
-2. Django (1.2 or newer)
-3. An existing WORKING Django project with database etc. If you
+1. Python 2.6+ 
+2. Django (1.4 or newer)
+3. South for database migrations (highly recommended, but not required). Download from http://south.aeracode.org/
+4. An existing WORKING Django project with database etc. If you
    cannot log into the Admin, you won't get this product working.
+5. `pip install django-bootstrap-form` and add `bootstrapform` to `settings.INSTALLED_APPS`
+6. `pip install django-markdown-deux` and add `markdown_deux` to `settings.INSTALLED_APPS`
+7. `pip install email-reply-parser` to get smart email reply handling
 
 **NOTE REGARDING SQLITE AND SEARCHING:**
 If you use sqlite as your database, the search function will not work as
@@ -37,42 +44,67 @@ http://docs.djangoproject.com/en/dev/ref/databases/#sqlite-string-matching
 When you try to do a keyword search using sqlite, a message will be displayed
 to alert you to this shortcoming. There is no way around it, sorry.
 
+**NOTE REGARDING MySQL:**
+If you use MySQL, with most default configurations you will receive an error 
+when creating the database tables as we populate a number of default templates 
+in languages other than English. 
+
+You must create the database the holds the django-helpdesk tables using the 
+UTF-8 collation; see the MySQL manual for more information: 
+http://dev.mysql.com/doc/refman/5.1/en/charset-database.html
+
+If you do NOT do this step, and you only want to use English-language templates,
+you can continue however you will receive a warning when running the 'migrate'
+commands.
+
+Fresh Django Installations
+--------------------------
+
+If you're on a brand new Django installation, make sure you do a ``syncdb``
+**before** adding ``helpdesk`` to your ``INSTALLED_APPS``. This will avoid 
+errors with trying to create User settings.
+
 Upgrading from previous versions
-================================
+--------------------------------
 
-If you are upgrading from a previous version of django-helpdesk, you should 
-read the UPGRADING file to learn what changes you will need to make to get 
-the current version of django-helpdesk working.
+We highly recommend that you use South (available 
+from http://south.aeracode.org/) to assist with management of database schema
+changes. 
 
-1. Find out your current version of django-helpdesk. In the 'helpdesk' folder,
-   use the 'svn' command to find the current revision::
+If you are upgrading from a previous version that did NOT use South for 
+migrations (i.e. prior to April 2011) then you will need to 'fake' the first
+migration::
 
-      svn info .
+    python manage.py migrate helpdesk 0001 --fake
 
-   Look for the 'Revision' line, eg::
+If you are upgrading from a previous version of django-helpdesk that DID use
+South, simply download an up to date version of the code base (eg by using 
+`git pull` or `pip install --upgrade django-helpdesk`) then migrate the database::
 
-      Revision: 92
+    python manage.py migrate helpdesk --db-dry-run # DB untouched
+    python manage.py migrate helpdesk 
 
-2. Read through the UPGRADE file, looking for any changse made _after_ that 
-   revision. Apply the commands provided in order from oldest to most recent.
+Lastly, restart your web server software (eg Apache) or FastCGI instance, to 
+ensure the latest changes are in use.
 
-3. Restart your web server software (eg Apache) or FastCGI instance, to ensure
-   the latest changes are in use.
-
-4. Continue to the 'Initial Configuration' area, if needed.
+You can continue to the 'Initial Configuration' area, if needed.
 
 Installation
-============
+------------
 
 ``pip install django-helpdesk``
 
 For further installation information see docs/install.html and docs/configuration.html
 
-Internationalisation
-====================
+Contributing
+------------
 
 If you want to help translate django-helpdesk into languages other than English, we encourage you to make use of our Transifex project.
 
 http://www.transifex.net/projects/p/django-helpdesk/resource/core/
 
 Feel free to request access to contribute your translations.
+
+Pull requests for all other changes are welcome. We're currently trying to add test cases wherever possible, so please continue to include tests with pull requests.
+
+.. image:: https://secure.travis-ci.org/rossp/django-helpdesk.png?branch=master
